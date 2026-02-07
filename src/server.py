@@ -1,25 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Servidor TCP para gerenciamento de vagas de estacionamento.
-O servidor escuta conexões de clientes e responde a comandos para consultar,
-pegar e liberar vagas.
 
-Autor: ChatGPT e Copilot com orientação e revisão de Minora
-Data: 2024-06-15
-
-Procure por FIXME para identificar pontos que precisam de implementação adicional.
-
-"""
 import socket
 import os
 import threading
 from dotenv import load_dotenv
 
-# FIXME: Implemente a lógica de gerenciamento de vagas conforme necessário
+# Configurações Globais
+VAGAS_TOTAIS = 10
+vagas_disponiveis = VAGAS_TOTAIS
+vagas_lock = threading.Lock() # Lock para evitar condição de corrida
 
 def escutar_cliente(nova_conexao, endereco):
-    """Função para tratar a comunicação com cada cliente"""
+    global vagas_disponiveis
     print(f'Cliente conectado de {endereco}')
     
     try:
@@ -28,49 +21,46 @@ def escutar_cliente(nova_conexao, endereco):
             if not mensagem:
                 break            
             comando = mensagem.decode("utf-8").strip()
-            print(f'Mensagem recebida de {endereco}: {comando}')
             
-            if comando == 'consultar_vaga':
-                # retorna quantidade de vagas disponíveis
-                # FIXME: implementar lógica real de consulta
-                resposta = str(0)
-                nova_conexao.send(resposta.encode('utf-8'))
+            resposta = "-1" # Padrão para erro
+
+            # Seção Crítica protegida por Lock
+            with vagas_lock:
+                if comando == 'consultar_vaga':
+                    resposta = str(vagas_disponiveis)
                 
-            elif comando == 'pegar_vaga':
-                # FIXME: implementar lógica real de alocação
-                # retorna 1 se vaga foi alocada com sucesso
-                #     ou 0 se não há vagas disponíveis
-                resposta = str(1)
-                nova_conexao.send(resposta.encode('utf-8'))
+                elif comando == 'pegar_vaga':
+                    if vagas_disponiveis > 0:
+                        vagas_disponiveis -= 1
+                        resposta = "1" # Sucesso
+                    else:
+                        resposta = "0" # Lotado
                 
-            elif comando == 'liberar_vaga':
-                # FIXME: implementar lógica real de alocação
-                # retorna 1 se vaga foi liberada com sucesso
-                #     ou 0 se não o cliente não possuía vaga alocada
-                # caso de sucesso, lembrar de fechar a conexão e finalizar esta função
-                resposta = str(1)
-                nova_conexao.send(resposta.encode('utf-8'))
-                
-            else:
-                # retorna -1 para comando inválido
-                resposta = '-1'
-                nova_conexao.send(resposta.encode('utf-8'))
+                elif comando == 'liberar_vaga':
+                    if vagas_disponiveis < VAGAS_TOTAIS:
+                        vagas_disponiveis += 1
+                        resposta = "1" # Sucesso
+                    else:
+                        resposta = "0" # Erro: Estacionamento já vazio
+
+            nova_conexao.send(resposta.encode('utf-8'))
+            
+            # Se liberou a vaga, encerramos essa conexão conforme o protocolo
+            if comando == 'liberar_vaga' and resposta == "1":
+                break
                 
     finally:
         nova_conexao.close()
         print(f'Cliente {endereco} desconectado')
 
 def iniciar_servidor():
-    """Função para iniciar o servidor TCP"""
     load_dotenv()
     PORTA = int(os.getenv('PORT', 5000))
-
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     servidor.bind(('localhost', PORTA))
-    servidor.listen(5)
+    servidor.listen(50) # Aumentado para suportar a fila de 50 clientes
     print(f'Servidor escutando na porta {PORTA}')
-    print('Aguardando conexões de clientes...\n')
     return servidor
 
 def main():
@@ -81,10 +71,8 @@ def main():
             thread = threading.Thread(target=escutar_cliente, args=(nova_conexao, endereco))
             thread.daemon = True
             thread.start()
-        
     finally:
         servidor.close()
-        print('\nServidor encerrado')
 
 if __name__ == '__main__':
     main()
